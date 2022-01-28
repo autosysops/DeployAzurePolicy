@@ -15,6 +15,9 @@
         },
         "policyJson": {
             "type": "string"
+        },
+        "tagScriptJson": {
+            "type": "string"
         }
     },
     "variables" : {
@@ -28,7 +31,9 @@
             },
             "mode": "Indexed"
         },
-        "policyDefinition" : "[union(json(replace(parameters('policyJson'),'<YOUR ROLE ID>',variables('midOutput').customRoleResourceId.Value)), variables('policyDefinitionAddOn'))]",
+        "scripturl": "\"primaryScriptUri\": \"https://raw.githubusercontent.com/autosysops/TagLoadbalancedVMs/main/Scripts/Set-VmTag.ps1\",",
+        "scriptcontent": "[concat('\"scriptContent\": ',parameters('tagScriptJson'),',')]",
+        "policyDefinition" : "[union(json(replace(replace(parameters('policyJson'),'<YOUR ROLE ID>',variables('midOutput').customRoleResourceId.Value),variables('scripturl'),variables('scriptcontent'))), variables('policyDefinitionAddOn'))]",
         "policyAssignmentName": "Tag Loadbalanced VM's"
     },
     "resources": [
