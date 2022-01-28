@@ -1,0 +1,84 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "tagName": {
+            "type": "string",
+            "defaultValue": "LoadbalancedVM"
+        },
+        "tagValue": {
+            "type": "string",
+            "defaultValue": "yes"
+        },
+        "midOutput": {
+            "type": "string"
+        },
+        "policyJson": {
+            "type": "string"
+        }
+    },
+    "variables" : {
+        "midOutput": "[json(parameters('midOutput'))]",
+        "policyDefinitionAddOn": {
+            "displayName": "Tag Loadbalanced VM's",
+            "policyType": "Custom",
+            "description": "Make sure all VM's behind a loadbalancer are tagged.",
+            "metadata": {
+                "category": "Tags"
+            },
+            "mode": "Indexed"
+        },
+        "policyDefinition" : "[union(json(replace(parameters('policyJson'),'<YOUR ROLE ID>',variables('midOutput').customRoleResourceId.Value)), variables('policyDefinitionAddOn'))]",
+        "policyAssignmentName": "Tag Loadbalanced VM's"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Authorization/policyDefinitions",
+            "name": "PolicyDefinition",
+            "apiVersion": "2021-06-01",
+            "properties": "[variables('policyDefinition')]"
+        },
+        {
+            "type": "Microsoft.Authorization/policyAssignments",
+            "name": "AssignPolicy",
+            "apiVersion": "2019-09-01",
+            "dependsOn": [
+                "[resourceId('Microsoft.Authorization/policyDefinitions/', 'PolicyDefinition')]"
+            ],
+            "identity": {
+                "type": "SystemAssigned"
+            },
+            "location": "West Europe",
+            "properties": {
+                "displayName": "[variables('policyAssignmentName')]",
+                "scope": "[subscription().id]",
+                "enforcementMode": "Default",
+                "policyDefinitionId": "[resourceId('Microsoft.Authorization/policyDefinitions/', 'PolicyDefinition')]",
+                "parameters": {
+                    "managedIdentityId": {
+                        "value": "[variables('midOutput').midResourceId.Value]"
+                    },
+                    "tagName": {
+                        "value": "[parameters('tagName')]"
+                    },
+                    "tagValue": {
+                        "value": "[parameters('tagValue')]"
+                    }
+                },
+                "metadata": {}
+            }
+        },
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2015-07-01",
+            "name": "[guid('CustomRole')]",
+            "dependsOn": [
+                "[concat('/subscriptions/',subscription().subscriptionId,'/providers/Microsoft.Authorization/policyAssignments/AssignPolicy')]"
+            ],
+            "properties": {
+                "roleDefinitionId": "[variables('midOutput').customRoleResourceId.Value]",
+                "principalId": "[reference(concat('/subscriptions/',subscription().subscriptionId,'/providers/Microsoft.Authorization/policyAssignments/AssignPolicy'), '2019-09-01', 'full').identity.principalId]"
+            }
+        }
+    ]
+}

@@ -1,0 +1,210 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "rgName": {
+            "type": "string",
+            "defaultValue": "Policy-RG"
+        },
+        "adminPassword": {
+            "type": "secureString"
+        },
+        "location": {
+            "type": "string",
+            "defaultValue": "westeurope"
+        }
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Resources/resourceGroups",
+            "apiVersion": "2021-04-01",
+            "location": "[parameters('location')]",
+            "name": "[parameters('rgName')]",
+            "properties": {}
+        },
+        {
+            "type": "Microsoft.Resources/deployments",
+            "apiVersion": "2021-04-01",
+            "name": "CreateLBVM",
+            "dependsOn": [
+                "[resourceId('Microsoft.Resources/resourceGroups', parameters('rgName'))]"
+            ],
+            "subscriptionId": "[subscription().subscriptionId]",
+            "resourceGroup": "[parameters('rgName')]",
+            "properties": {
+                "mode": "Incremental",
+                "expressionEvaluationOptions": {
+                    "scope": "inner"
+                },
+                "parameters": {
+                    "adminPassword": {
+                        "value": "[parameters('adminPassword')]"
+                    }
+                },
+                "template": {
+                    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "adminPassword": {
+                            "type": "secureString"
+                        }
+                    },
+                    "variables": {
+                        "addressPrefix": "10.0.0.0/24",
+                        "subnetPrefix": "10.0.0.0/24"
+                    },
+                    "resources": [
+                        {
+                            "type": "Microsoft.Network/networkSecurityGroups",
+                            "apiVersion": "2021-02-01",
+                            "name": "Test-Vm-NSG",
+                            "location": "[resourceGroup().location]",
+                            "properties": {
+                                "securityRules": []
+                            }
+                        },
+                        {
+                            "type": "Microsoft.Network/virtualNetworks",
+                            "apiVersion": "2021-02-01",
+                            "name": "Test-VM-Vnet",
+                            "location": "[resourceGroup().location]",
+                            "properties": {
+                                "addressSpace": {
+                                    "addressPrefixes": [
+                                        "[variables('addressPrefix')]"
+                                    ]
+                                },
+                                "subnets": [
+                                    {
+                                        "name": "default",
+                                        "properties": {
+                                            "addressPrefix": "[variables('subnetPrefix')]",
+                                            "networkSecurityGroup": {
+                                                "id": "[resourceId('Microsoft.Network/networkSecurityGroups', 'Test-VM-NSG')]"
+                                            }
+                                        }
+                                    }
+                                ]
+                            },
+                            "dependsOn": [
+                                "[resourceId('Microsoft.Network/networkSecurityGroups', 'Test-VM-NSG')]"
+                            ]
+                        },
+                        {
+                            "apiVersion": "2021-02-01",
+                            "name": "Test-Lb",
+                            "type": "Microsoft.Network/loadBalancers",
+                            "location": "[resourceGroup().location]",
+                            "dependsOn": [
+                                "[resourceId('Microsoft.Network/virtualNetworks', 'Test-Vm-Vnet')]"
+                            ],
+                            "tags": {},
+                            "properties": {
+                                "frontendIPConfigurations": [
+                                    {
+                                        "name": "Test-Lb-IP",
+                                        "properties": {
+                                            "privateIPAddress": null,
+                                            "privateIPAddressVersion": "IPv4",
+                                            "privateIPAllocationMethod": "Dynamic",
+                                            "subnet": {
+                                                "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', 'Test-Vm-Vnet', 'default')]"
+                                            }
+                                        }
+                                    }
+                                ],
+                                "backendAddressPools": [
+                                    {
+                                        "name": "Test-Lb-BackendPool"
+                                    }
+                                ],
+                                "probes": [],
+                                "loadBalancingRules": [],
+                                "inboundNatRules": [],
+                                "outboundRules": []
+                            },
+                            "sku": {
+                                "name": "Standard",
+                                "tier": "Regional"
+                            }
+                        },
+                        {
+                            "type": "Microsoft.Network/networkInterfaces",
+                            "apiVersion": "2021-02-01",
+                            "name": "Test-VM-Nic",
+                            "location": "[resourceGroup().location]",
+                            "properties": {
+                                "ipConfigurations": [
+                                    {
+                                        "name": "ipconfig1",
+                                        "properties": {
+                                            "privateIPAllocationMethod": "Dynamic",
+                                            "subnet": {
+                                                "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', 'Test-Vm-Vnet', 'default')]"
+                                            },
+                                            "loadBalancerBackendAddressPools": [
+                                                {
+                                                    "id": "[concat(resourceId('Microsoft.Network/loadBalancers', 'Test-Lb') , '/backendAddressPools/Test-Lb-BackendPool')]"
+                                                }
+                                            ]
+                                        }
+                                    }
+                                ]
+                            },
+                            "dependsOn": [
+                                "[resourceId('Microsoft.Network/virtualNetworks', 'Test-Vm-Vnet')]",
+                                "[resourceId('Microsoft.Network/loadBalancers', 'Test-Lb')]"
+                            ]
+                        },
+                        {
+                            "type": "Microsoft.Compute/virtualMachines",
+                            "apiVersion": "2021-03-01",
+                            "name": "Test-VM",
+                            "location": "[resourceGroup().location]",
+                            "properties": {
+                                "hardwareProfile": {
+                                    "vmSize": "Standard_B2ms"
+                                },
+                                "osProfile": {
+                                    "computerName": "Test-VM",
+                                    "adminUsername": "TestVmAdministrator",
+                                    "adminPassword": "[parameters('adminPassword')]"
+                                },
+                                "storageProfile": {
+                                    "imageReference": {
+                                        "publisher": "MicrosoftWindowsServer",
+                                        "offer": "WindowsServer",
+                                        "sku": "2019-datacenter-gensecond",
+                                        "version": "latest"
+                                    },
+                                    "osDisk": {
+                                        "createOption": "FromImage",
+                                        "managedDisk": {
+                                            "storageAccountType": "StandardSSD_LRS"
+                                        }
+                                    },
+                                    "dataDisks": []
+                                },
+                                "networkProfile": {
+                                    "networkInterfaces": [
+                                        {
+                                            "id": "[resourceId('Microsoft.Network/networkInterfaces', 'Test-VM-Nic')]"
+                                        }
+                                    ]
+                                },
+                                "diagnosticsProfile": {
+                                    "bootDiagnostics": {
+                                        "enabled": false
+                                    }
+                                }
+                            },
+                            "dependsOn": [
+                                "[resourceId('Microsoft.Network/networkInterfaces', 'Test-VM-Nic')]"
+                            ]
+                        }
+                    ]
+                }
+            }
+        }
+    ]
+}

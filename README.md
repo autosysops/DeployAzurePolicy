@@ -1,0 +1,1 @@
+This repository describes a way of publishing a azure policy via a Azure DevOps pipelin. For more infromation look at (this link)[https://autosysops.com/blog/deploy-azure-policy-with-azure-devops].

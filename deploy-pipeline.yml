@@ -1,0 +1,145 @@
+trigger: none
+
+pool:
+  vmImage: 'windows-latest'
+
+variables:
+  foldername: 'src'
+  artifactname: 'policy'
+  serviceconnection: 'YOUR SERVICECONNECTION'
+
+stages:
+- stage: Build
+  displayName: Build policy resources
+  jobs:
+  - job: Build
+    displayName: Build policy resources
+    steps:
+    - checkout: self
+      path: $(foldername)
+    - task: PowerShell@2
+      displayName: "Clone policy repo into source directory"
+      inputs:
+        targetType: 'inline'
+        script: |
+          cd .. 
+          git clone https://github.com/autosysops/TagLoadbalancedVMs.git
+          Copy-Item -Path .\TagLoadbalancedVMs\Policies -Destination .\$(foldername)\ -Recurse -Force
+          Copy-Item -Path .\TagLoadbalancedVMs\Roles -Destination .\$(foldername)\ -Recurse -Force
+          Copy-Item -Path .\TagLoadbalancedVMs\Scripts -Destination .\$(foldername)\ -Recurse -Force
+        pwsh: true
+    - task: PowerShell@2
+      displayName: "Clone scriptanalyzer tests info source directory"
+      inputs:
+        targetType: 'inline'
+        script: |
+          cd .. 
+          git clone https://github.com/autosysops/CodeQuality.git
+          Copy-Item -Path .\CodeQuality\tests\advanced\* -Destination .\$(foldername)\Tests\Unit\codequality\ -Recurse -Force
+          Copy-Item -Path .\CodeQuality\tests\init\* -Destination .\$(foldername)\Tests\Unit\init\ -Recurse -Force
+        pwsh: true
+    - task: PublishBuildArtifacts@1
+      displayName: Save Artifact
+      inputs:
+        PathtoPublish: $(Build.SourcesDirectory)
+        ArtifactName: $(artifactname)
+        publishLocation: "Container"
+
+- stage: UnitTests
+  displayName: "Unit Tests"
+  jobs:
+  - job: PowershellUnitTests
+    displayName: "Run Powershell Unit Tests"
+    steps:
+    - checkout: none
+    - task: DownloadPipelineArtifact@2
+      displayName: Download Artifact
+      inputs:
+        artifact: $(artifactname)
+        path: $(Build.SourcesDirectory)\$(foldername)
+    - task: PowerShell@2
+      displayName: 'Run Unit Tests'
+      inputs:
+        targetType: "filePath"
+        filePath: $(Build.SourcesDirectory)\$(foldername)\Invoke-UnitTests.ps1
+        pwsh: true
+      continueOnError: true
+    - task: PublishTestResults@2
+      displayName: "Publish testresults"
+      inputs:
+        testResultsFormat: 'NUnit'
+        testResultsFiles: 'testresults.important.xml'
+        mergeTestResults: true
+        failTaskOnFailedTests: true
+        testRunTitle: 'Unit Tests'
+      condition: in(variables['Agent.JobStatus'], 'Succeeded', 'SucceededWithIssues', 'Failed')
+    - task: PublishTestResults@2
+      displayName: "Publish optional testresults"
+      inputs:
+        testResultsFormat: 'NUnit'
+        testResultsFiles: 'testresults.information.xml'
+        mergeTestResults: true
+        failTaskOnFailedTests: false
+        testRunTitle: 'Unit Tests (Optional)'
+      condition: in(variables['Agent.JobStatus'], 'Succeeded', 'SucceededWithIssues', 'Failed')
+
+- stage: Deploy
+  displayName: "Deploy Resources"
+  jobs:
+  - job: Deploy
+    displayName: "Deploy Resources to Azure"
+    steps:
+    - checkout: none
+    - task: DownloadPipelineArtifact@2
+      displayName: Download Artifact
+      inputs:
+        artifact: $(artifactname)
+        path: $(Build.SourcesDirectory)\$(foldername)
+    - task: AzurePowerShell@5
+      displayName: 'Deploy ARM templates'
+      inputs:
+        azureSubscription: '$(serviceconnection)'
+        ScriptType: 'FilePath'
+        ScriptPath: '$(Build.SourcesDirectory)\$(foldername)\Deploy-Resources.ps1'
+        azurePowerShellVersion: 'latestVersion'
+        pwsh: true
+
+- stage: IntegrationTests
+  displayName: "Integration Tests"
+  jobs:
+  - job: IntegrationTests
+    displayName: "Deploy VM to test Policy"
+    steps:
+    - checkout: none
+    - task: DownloadPipelineArtifact@2
+      displayName: Download Artifact
+      inputs:
+        artifact: $(artifactname)
+        path: $(Build.SourcesDirectory)\$(foldername)
+    - task: AzurePowerShell@5
+      displayName: 'Run Integration Tests'
+      inputs:
+        azureSubscription: '$(serviceconnection)'
+        ScriptType: 'FilePath'
+        ScriptPath: '$(Build.SourcesDirectory)\$(foldername)\Invoke-IntegrationTests.ps1'
+        azurePowerShellVersion: 'latestVersion'
+        pwsh: true
+      continueOnError: true
+    - task: PublishTestResults@2
+      inputs:
+        testResultsFormat: 'NUnit'
+        testResultsFiles: 'testresults.xml'
+        mergeTestResults: true
+        failTaskOnFailedTests: true
+        testRunTitle: 'Integration Tests'
+      condition: in(variables['Agent.JobStatus'], 'Succeeded', 'SucceededWithIssues', 'Failed')
+    - task: AzurePowerShell@5
+      displayName: 'Cleanup Resources from Tests'
+      inputs:
+        azureSubscription: '$(serviceconnection)'
+        ScriptType: 'FilePath'
+        ScriptPath: '$(Build.SourcesDirectory)\$(foldername)\Clear-TestResources.ps1'
+        azurePowerShellVersion: 'latestVersion'
+        pwsh: true
+      condition: in(variables['Agent.JobStatus'], 'Succeeded', 'SucceededWithIssues', 'Failed')
+    
